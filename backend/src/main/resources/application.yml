@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: apexcode-backend
+
+  datasource:
+    url: ${SUPABASE_DB_URL}
+    username: ${SUPABASE_DB_USERNAME}
+    password: ${SUPABASE_DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+
+  jackson:
+    default-property-inclusion: non_null
+
+server:
+  port: 8080
+
+judge:
+  base-url: ${JUDGE_SERVICE_URL:http://localhost:4000}

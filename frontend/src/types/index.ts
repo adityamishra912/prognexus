@@ -74,7 +74,6 @@ export interface Problem {
 export interface ProblemCodeTemplate {
   id: number;
   problem_id: number;
-  language: string;
   starter_code: string;
   entry_class: string | null;
   entry_method: string | null;
@@ -298,8 +297,26 @@ export interface SubmissionPayload {
   files?: Array<{ file_path: string; file_content: string; language: string }>;
 }
 
+export type RunCodePayload =
+  | {
+      problemId: number;
+      language: string;
+      code: string;
+      files?: never;
+    }
+  | {
+      problemId: number;
+      language: string;
+      files: Array<{
+        file_path: string;
+        file_content: string;
+        language: string;
+      }>;
+      code?: never;
+    };
+
 export interface ExecutionResult {
-  submissionId: string;
+  submissionId?: string;
   status: SubmissionStatus;
   testsPassed: number;
   testsTotal: number;

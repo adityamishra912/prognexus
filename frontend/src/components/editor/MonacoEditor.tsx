@@ -29,7 +29,10 @@ import {
 } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
-import { submitProblemSolution } from "@/lib/api/submissions";
+import {
+  submitProblemSolution,
+  runProblemCode
+} from "@/lib/api/submissions";
 import { fetchProblemCodeTemplate } from "@/lib/supabase/problems";
 
 export interface MonacoEditorProps {
@@ -61,6 +64,8 @@ function getLanguageLabel(language: string): string {
       return "C++";
     case "python":
       return "Python";
+    case "c":
+      return "c";
     case "javascript":
       return "JavaScript";
     case "typescript":
@@ -82,6 +87,8 @@ function getFileExtension(language: string): string {
       return "cpp";
     case "python":
       return "py";
+    case "c":
+      return "c";
     case "typescript":
       return "ts";
     case "sql":
@@ -102,6 +109,8 @@ function getMonacoLanguage(language: string): string {
       return "cpp";
     case "python":
       return "python";
+    case "c":
+      return "c";
     case "typescript":
       return "typescript";
     case "sql":
@@ -129,7 +138,7 @@ export function MonacoEditor({
 }: MonacoEditorProps) {
   const problemTitle = problem?.title ?? "";
   const languageOptionsByType: Record<string, string[]> = {
-    dsa: ["java", "cpp", "python"],
+    dsa: ["java", "cpp", "python", "c"],
     development: ["javascript", "typescript"],
     sql: ["sql"],
     bash: ["bash"],
@@ -141,19 +150,19 @@ export function MonacoEditor({
   );
   const previousLanguage = previousSubmission?.language
     ? executionLanguages.find(
-        (language) =>
-          normalizeLanguage(language) ===
-          normalizeLanguage(previousSubmission.language)
-      )
+      (language) =>
+        normalizeLanguage(language) ===
+        normalizeLanguage(previousSubmission.language)
+    )
     : undefined;
   const preferredLanguage =
     normalizedProblemType === "sql"
       ? "sql"
       : normalizedProblemType === "bash"
-      ? "bash"
-      : normalizedProblemType === "development"
-      ? "javascript"
-      : "java";
+        ? "bash"
+        : normalizedProblemType === "development"
+          ? "javascript"
+          : "java";
   const defaultLanguage =
     previousLanguage ??
     executionLanguages.find(
@@ -258,11 +267,11 @@ export function MonacoEditor({
       prev.map((f, idx) =>
         idx === 0
           ? {
-              ...f,
-              file_path: newFileName,
-              file_content: nextCode,
-              language: newMonacoLang,
-            }
+            ...f,
+            file_path: newFileName,
+            file_content: nextCode,
+            language: newMonacoLang,
+          }
           : f
       )
     );
@@ -311,11 +320,11 @@ export function MonacoEditor({
           return previous.map((file, index) =>
             index === 0
               ? {
-                  ...file,
-                  file_path: `Solution.${getFileExtension(language)}`,
-                  file_content: template.starter_code,
-                  language: getMonacoLanguage(language),
-                }
+                ...file,
+                file_path: `Solution.${getFileExtension(language)}`,
+                file_content: template.starter_code,
+                language: getMonacoLanguage(language),
+              }
               : file
           );
         });
@@ -340,16 +349,24 @@ export function MonacoEditor({
     setActiveLeftTab("results");
     setExecutionError(null);
     try {
-      const result = await submitProblemSolution({
-        problemId,
-        language: selectedLanguage,
-        code: activeFile?.file_content ?? "",
-        files: files.map((f) => ({
-          file_path: f.file_path,
-          file_content: f.file_content,
-          language: f.language,
-        })),
-      });
+      const payload =
+        (problemType === "dsa" || problemType === "sql" || problemType === "bash")
+          ? {
+            problemId,
+            language: selectedLanguage,
+            code: activeFile?.file_content ?? "",
+          }
+          : {
+            problemId,
+            language: selectedLanguage,
+            files: files.map((file) => ({
+              file_path: file.file_path,
+              file_content: file.file_content,
+              language: file.language,
+            })),
+          };
+
+      const result = await runProblemCode(payload);
       setExecutionResult(result);
     } catch (error: unknown) {
       setExecutionError(
@@ -400,8 +417,8 @@ export function MonacoEditor({
     problem?.difficulty === "Easy"
       ? "easy"
       : problem?.difficulty === "Medium"
-      ? "medium"
-      : "hard";
+        ? "medium"
+        : "hard";
 
   const problemTypeName = problem?.problem_type?.name ?? problemType ?? "dsa";
 
@@ -416,32 +433,29 @@ export function MonacoEditor({
         <div className="flex items-center gap-0.5 px-2 bg-slate-900 border-b border-slate-800 text-xs font-medium text-slate-400 overflow-x-auto scrollbar-none">
           <button
             onClick={() => setActiveLeftTab("description")}
-            className={`px-3 py-2.5 border-b-2 flex items-center gap-1.5 whitespace-nowrap transition-colors ${
-              activeLeftTab === "description"
+            className={`px-3 py-2.5 border-b-2 flex items-center gap-1.5 whitespace-nowrap transition-colors ${activeLeftTab === "description"
                 ? "border-blue-500 text-blue-400 font-semibold bg-slate-800/40"
                 : "border-transparent hover:text-slate-200 hover:bg-slate-800/20"
-            }`}
+              }`}
           >
             <FileText className="w-3.5 h-3.5" />
             Description
           </button>
           <button
             onClick={() => setActiveLeftTab("results")}
-            className={`px-3 py-2.5 border-b-2 flex items-center gap-1.5 whitespace-nowrap transition-colors ${
-              activeLeftTab === "results"
+            className={`px-3 py-2.5 border-b-2 flex items-center gap-1.5 whitespace-nowrap transition-colors ${activeLeftTab === "results"
                 ? "border-blue-500 text-blue-400 font-semibold bg-slate-800/40"
                 : "border-transparent hover:text-slate-200 hover:bg-slate-800/20"
-            }`}
+              }`}
           >
             <Cpu className="w-3.5 h-3.5" />
             Execution Results
             {executionResult && (
               <span
-                className={`text-[10px] px-1.5 py-0.2 rounded font-mono font-bold ${
-                  executionResult.status === "Accepted"
+                className={`text-[10px] px-1.5 py-0.2 rounded font-mono font-bold ${executionResult.status === "Accepted"
                     ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
                     : "bg-rose-500/20 text-rose-400 border border-rose-500/30"
-                }`}
+                  }`}
               >
                 {executionResult.status}
               </span>
@@ -449,33 +463,30 @@ export function MonacoEditor({
           </button>
           <button
             onClick={() => setActiveLeftTab("analysis")}
-            className={`px-3 py-2.5 border-b-2 flex items-center gap-1.5 whitespace-nowrap transition-colors ${
-              activeLeftTab === "analysis"
+            className={`px-3 py-2.5 border-b-2 flex items-center gap-1.5 whitespace-nowrap transition-colors ${activeLeftTab === "analysis"
                 ? "border-purple-500 text-purple-400 font-semibold bg-slate-800/40"
                 : "border-transparent hover:text-slate-200 hover:bg-slate-800/20"
-            }`}
+              }`}
           >
             <Sparkles className="w-3.5 h-3.5 text-purple-400" />
             AI Analysis
           </button>
           <button
             onClick={() => setActiveLeftTab("saved")}
-            className={`px-3 py-2.5 border-b-2 flex items-center gap-1.5 whitespace-nowrap transition-colors ${
-              activeLeftTab === "saved"
+            className={`px-3 py-2.5 border-b-2 flex items-center gap-1.5 whitespace-nowrap transition-colors ${activeLeftTab === "saved"
                 ? "border-emerald-500 text-emerald-400 font-semibold bg-slate-800/40"
                 : "border-transparent hover:text-slate-200 hover:bg-slate-800/20"
-            }`}
+              }`}
           >
             <FileCheck className="w-3.5 h-3.5 text-emerald-400" />
             Saved Solution
           </button>
           <button
             onClick={() => setActiveLeftTab("submissions")}
-            className={`px-3 py-2.5 border-b-2 flex items-center gap-1.5 whitespace-nowrap transition-colors ${
-              activeLeftTab === "submissions"
+            className={`px-3 py-2.5 border-b-2 flex items-center gap-1.5 whitespace-nowrap transition-colors ${activeLeftTab === "submissions"
                 ? "border-amber-500 text-amber-400 font-semibold bg-slate-800/40"
                 : "border-transparent hover:text-slate-200 hover:bg-slate-800/20"
-            }`}
+              }`}
           >
             <History className="w-3.5 h-3.5 text-amber-400" />
             Submissions ({publicSubmissions.length})
@@ -598,11 +609,10 @@ export function MonacoEditor({
                           <XCircle className="w-5 h-5 text-rose-400" />
                         )}
                         <span
-                          className={`text-base font-bold ${
-                            executionResult.status === "Accepted"
+                          className={`text-base font-bold ${executionResult.status === "Accepted"
                               ? "text-emerald-400"
                               : "text-rose-400"
-                          }`}
+                            }`}
                         >
                           {executionResult.status}
                         </span>
@@ -655,11 +665,10 @@ export function MonacoEditor({
                             Test Case #{idx + 1}
                           </span>
                           <span
-                            className={`font-sans font-bold text-xs ${
-                              tr.status === "Passed"
+                            className={`font-sans font-bold text-xs ${tr.status === "Passed"
                                 ? "text-emerald-400"
                                 : "text-rose-400"
-                            }`}
+                              }`}
                           >
                             {tr.status}
                           </span>
@@ -874,11 +883,10 @@ export function MonacoEditor({
                   <button
                     key={file.file_path}
                     onClick={() => setActiveFilePath(file.file_path)}
-                    className={`px-2.5 py-1 rounded text-xs flex items-center gap-1.5 transition-colors ${
-                      activeFilePath === file.file_path
+                    className={`px-2.5 py-1 rounded text-xs flex items-center gap-1.5 transition-colors ${activeFilePath === file.file_path
                         ? "bg-blue-600/20 text-blue-400 border border-blue-500/30"
                         : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-                    }`}
+                      }`}
                   >
                     <FileCode className="w-3.5 h-3.5" />
                     {file.file_path}
@@ -937,17 +945,16 @@ export function MonacoEditor({
             templateStates[selectedLanguage] === "error") && (
             <div
               role={templateStates[selectedLanguage] === "error" ? "alert" : "status"}
-              className={`border-b px-4 py-2 text-xs ${
-                templateStates[selectedLanguage] === "error"
+              className={`border-b px-4 py-2 text-xs ${templateStates[selectedLanguage] === "error"
                   ? "border-rose-500/20 bg-rose-500/5 text-rose-300"
                   : "border-amber-500/20 bg-amber-500/5 text-amber-300"
-              }`}
+                }`}
             >
               {templateStates[selectedLanguage] === "loading"
                 ? `Loading ${getLanguageLabel(selectedLanguage)} starter code...`
                 : templateStates[selectedLanguage] === "missing"
-                ? `No ${getLanguageLabel(selectedLanguage)} starter template exists for this problem. Choose another supported language or write your own code.`
-                : templateErrors[selectedLanguage]}
+                  ? `No ${getLanguageLabel(selectedLanguage)} starter template exists for this problem. Choose another supported language or write your own code.`
+                  : templateErrors[selectedLanguage]}
             </div>
           )}
 
@@ -964,11 +971,10 @@ export function MonacoEditor({
                 <button
                   key={file.file_path}
                   onClick={() => setActiveFilePath(file.file_path)}
-                  className={`w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2 font-mono text-xs transition-colors ${
-                    activeFilePath === file.file_path
+                  className={`w-full text-left px-2.5 py-1.5 rounded flex items-center gap-2 font-mono text-xs transition-colors ${activeFilePath === file.file_path
                       ? "bg-blue-600/20 text-blue-400 font-medium"
                       : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-                  }`}
+                    }`}
                 >
                   <FileCode className="w-3.5 h-3.5 text-slate-500" />
                   {file.file_path}
@@ -1017,11 +1023,10 @@ export function MonacoEditor({
                 <button
                   key={tc.id || idx}
                   onClick={() => setSelectedTestCaseIndex(idx)}
-                  className={`px-2.5 py-1 rounded text-xs font-mono transition-colors ${
-                    selectedTestCaseIndex === idx
+                  className={`px-2.5 py-1 rounded text-xs font-mono transition-colors ${selectedTestCaseIndex === idx
                       ? "bg-blue-600/20 text-blue-400 border border-blue-500/30 font-semibold"
                       : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-                  }`}
+                    }`}
                 >
                   Case {idx + 1}
                 </button>
