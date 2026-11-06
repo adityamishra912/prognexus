@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import executeRouter from "./routes/execute.js";
+import judgeRouter from "./routes/judge.js";
 
 const app = express();
 
@@ -21,6 +22,9 @@ app.get("/health", (_req, res) => {
 
 // Execution routes
 app.use("/api/execute", executeRouter);
+
+// New harness-generation route
+app.use("/api/judge", judgeRouter);
 
 // Start local Express server
 app.listen(PORT, () => {

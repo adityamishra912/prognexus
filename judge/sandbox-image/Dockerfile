@@ -1,3 +1,4 @@
+
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -13,6 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     make \
     bash \
     coreutils \
+    time \
     findutils \
     diffutils \
     jq \
@@ -22,9 +24,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Set a consistent working directory
 WORKDIR /workspace
 
-# Verify installed toolchains
+# Verify installed toolchains and utilities
 RUN java -version && \
     javac -version && \
     python3.12 --version && \
     gcc --version && \
-    g++ --version
+    g++ --version && \
+    command -v timeout && \
+    test -x /usr/bin/time && \
+    /usr/bin/time --version

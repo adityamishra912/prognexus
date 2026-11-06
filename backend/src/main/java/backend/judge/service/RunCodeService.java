@@ -110,16 +110,17 @@ public class RunCodeService {
 
         // 8. Build Judge request
         JudgeExecutionRequest judgeRequest =
-                new JudgeExecutionRequest(
-                        request.problemId(),
-                        request.language().toLowerCase(),
-                        files,
-                        judgeTestCases,
-                        judgeConfig.getExecutionMode(),
-                        toMap(executionConfig.getExecutionConfig()),
-                        executionConfig.getTimeLimitMs(),
-                        executionConfig.getMemoryLimitMb()
-                );
+        new JudgeExecutionRequest(
+                request.problemId(),
+                request.language().toLowerCase(),
+                files,
+                judgeTestCases,
+                judgeConfig.getExecutionMode(),
+                toMap(judgeConfig.getFunctionSpec()),
+                toMap(executionConfig.getExecutionConfig()),
+                executionConfig.getTimeLimitMs(),
+                executionConfig.getMemoryLimitMb()
+        );
 
         // 9. Execute through Node Judge service
         JudgeExecutionResponse judgeResponse =

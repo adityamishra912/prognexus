@@ -21,6 +21,19 @@ public class RunCodeController {
     public ResponseEntity<RunCodeResponse> runCode(
             @Valid @RequestBody RunCodeRequest request
     ) {
-        return ResponseEntity.ok(runCodeService.run(request));
+        // Print incoming request
+        System.out.println("\n========== INCOMING REQUEST ==========");
+        System.out.println(request);
+        System.out.println("======================================");
+
+        // Execute service
+        RunCodeResponse response = runCodeService.run(request);
+
+        // Print outgoing response
+        System.out.println("\n========== OUTGOING RESPONSE ==========");
+        System.out.println(response);
+        System.out.println("======================================\n");
+        
+        return ResponseEntity.ok(response);
     }
 }

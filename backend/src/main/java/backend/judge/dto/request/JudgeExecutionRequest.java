@@ -1,3 +1,4 @@
+
 package backend.judge.dto.request;
 
 import java.util.List;
@@ -9,6 +10,7 @@ public record JudgeExecutionRequest(
         List<ExecutionFile> files,
         List<ExecutionTestCase> testCases,
         String executionMode,
+        Map<String, Object> functionSpec,
         Map<String, Object> executionConfig,
         Integer timeLimitMs,
         Integer memoryLimitMb
