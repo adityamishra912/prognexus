@@ -61,8 +61,8 @@ export interface Problem {
   description: string;
   difficulty: ProblemDifficulty;
   type_id: number;
-  constraints: string | null;
-  hints: string[] | null;
+  constraints?: string | null;
+  hints?: string[] | null;
   is_published: boolean;
   created_at: string;
   updated_at: string;

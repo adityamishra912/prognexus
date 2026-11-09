@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Code, Sparkles } from "lucide-react";
-import { Problem, Category, ProblemType } from "@/types";
+import { Problem, Category, ProblemType} from "@/types";
 import { ProblemCard } from "@/components/problems/ProblemCard";
 import { ProblemFilters } from "@/components/problems/ProblemFilters";
 import { Pagination } from "@/components/ui/Pagination";
@@ -67,10 +67,19 @@ export default function ProblemsPage() {
           .from("problems")
           .select(
             `
-            id, problem_number, title, slug, description, type_id, difficulty,
-            problem_type:problem_types${type ? "!inner" : ""}(*),
-            categories:problem_categories${category ? "!inner" : ""}(categories${category ? "!inner" : ""}(*)),
-            tags:problem_tags(tags(*))
+  id,
+  problem_number,
+  title,
+  slug,
+  description,
+  type_id,
+  difficulty,
+  is_published,
+  created_at,
+  updated_at,
+  problem_type:problem_types${type ? "!inner" : ""}(*),
+  categories:problem_categories${category ? "!inner" : ""}(categories${category ? "!inner" : ""}(*)),
+  tags:problem_tags(tags(*))
           `,
             { count: "exact" }
           )
@@ -104,17 +113,21 @@ export default function ProblemsPage() {
         if (error) {
           throw new Error(error.message);
         }
-        const formatted = (data ?? []).map((problem) => ({
+
+        const formatted: Problem[] = (data ?? []).map((problem) => ({
           ...problem,
-          categories: problem.categories
-            ? problem.categories.map(
-                (relation: { categories: unknown }) => relation.categories
-              )
-            : [],
-          tags: problem.tags
-            ? problem.tags.map((relation: { tags: unknown }) => relation.tags)
-            : [],
+
+          problem_type: Array.isArray(problem.problem_type)
+            ? problem.problem_type[0] ?? undefined
+            : problem.problem_type ?? undefined,
+
+          categories: (problem.categories ?? [])
+            .flatMap((relation) => relation.categories ?? []),
+
+          tags: (problem.tags ?? [])
+            .flatMap((relation) => relation.tags ?? []),
         }));
+
         setProblems(formatted);
         setTotalCount(count ?? 0);
       } catch (error: unknown) {
