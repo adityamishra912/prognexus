@@ -6,7 +6,6 @@ import backend.judge.dto.request.RunCodeRequest;
 import backend.judge.dto.response.JudgeExecutionResponse;
 import backend.judge.dto.response.RunCodeResponse;
 import backend.judge.dto.response.TestCaseResult;
-import backend.judge.entity.Problem;
 import backend.judge.entity.ProblemExecutionConfig;
 import backend.judge.entity.ProblemJudgeConfig;
 import backend.judge.entity.TestCase;
@@ -21,9 +20,11 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
-import java.util.stream.Collectors;
+import java.util.Objects;
 
 @Service
 public class RunCodeService {
@@ -53,14 +54,14 @@ public class RunCodeService {
     @Transactional(readOnly = true)
     public RunCodeResponse run(RunCodeRequest request) {
 
-        // 1. Load problem
+        // 1. Load problem.
         problemRepository.findById(request.problemId())
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND,
                         "Problem not found"
                 ));
 
-        // 2. Load execution configuration
+        // 2. Load execution configuration.
         ProblemExecutionConfig executionConfig =
                 executionConfigRepository.findById(request.problemId())
                         .orElseThrow(() -> new ResponseStatusException(
@@ -68,7 +69,7 @@ public class RunCodeService {
                                 "Execution configuration not found"
                         ));
 
-        // 3. Load judge configuration
+        // 3. Load judge configuration.
         ProblemJudgeConfig judgeConfig =
                 judgeConfigRepository.findByProblemId(request.problemId())
                         .orElseThrow(() -> new ResponseStatusException(
@@ -76,10 +77,10 @@ public class RunCodeService {
                                 "Judge configuration not found"
                         ));
 
-        // 4. Validate request
+        // 4. Validate request.
         validateRequest(request, executionConfig);
 
-        // 5. Fetch exactly three visible test cases
+        // 5. Fetch exactly three visible test cases.
         List<TestCase> testCases =
                 testCaseRepository.findByProblemIdAndHiddenFalseOrderByIdAsc(
                         request.problemId()
@@ -93,11 +94,11 @@ public class RunCodeService {
             );
         }
 
-        // 6. Build execution files
+        // 6. Build submitted execution files.
         List<JudgeExecutionRequest.ExecutionFile> files =
-                buildExecutionFiles(request);
+                buildExecutionFiles(request, judgeConfig.getExecutionMode());
 
-        // 7. Build test-case payload
+        // 7. Build test-case payload.
         List<JudgeExecutionRequest.ExecutionTestCase> judgeTestCases =
                 testCases.stream()
                         .map(testCase ->
@@ -108,110 +109,158 @@ public class RunCodeService {
                         )
                         .toList();
 
-        // 8. Build Judge request
+        // 8. Build Judge request.
         JudgeExecutionRequest judgeRequest =
-        new JudgeExecutionRequest(
-                request.problemId(),
-                request.language().toLowerCase(),
-                files,
-                judgeTestCases,
-                judgeConfig.getExecutionMode(),
-                toMap(judgeConfig.getFunctionSpec()),
-                toMap(executionConfig.getExecutionConfig()),
-                executionConfig.getTimeLimitMs(),
-                executionConfig.getMemoryLimitMb()
-        );
+                new JudgeExecutionRequest(
+                        request.problemId(),
+                        request.language().toLowerCase(Locale.ROOT),
+                        files,
+                        judgeTestCases,
+                        judgeConfig.getExecutionMode(),
+                        toMap(judgeConfig.getFunctionSpec()),
+                        toMap(executionConfig.getExecutionConfig()),
+                        executionConfig.getTimeLimitMs(),
+                        executionConfig.getMemoryLimitMb()
+                );
 
-        // 9. Execute through Node Judge service
+        // 9. Execute through Node Judge.
         JudgeExecutionResponse judgeResponse =
                 judgeClient.execute(judgeRequest);
 
-        if (judgeResponse == null || judgeResponse.results() == null) {
+        if (judgeResponse == null) {
             throw new ResponseStatusException(
                     HttpStatus.BAD_GATEWAY,
                     "Judge service returned an empty response"
             );
         }
 
-        // 10. Index expected test cases
-        Map<Long, TestCase> testCaseMap = testCases.stream()
-                .collect(Collectors.toMap(
-                        TestCase::getId,
-                        testCase -> testCase
-                ));
+        // 10. Validate and index execution results.
+        Map<Long, JudgeExecutionResponse.ExecutionResult> executionResultMap =
+                new HashMap<>();
 
+        if (judgeResponse.results() != null) {
+
+            for (JudgeExecutionResponse.ExecutionResult result
+                    : judgeResponse.results()) {
+
+                if (result.testCaseId() == null) {
+                    throw new ResponseStatusException(
+                            HttpStatus.BAD_GATEWAY,
+                            "Judge returned a result without a test case ID"
+                    );
+                }
+
+                if (testCases.stream().noneMatch(
+                        testCase -> testCase.getId().equals(result.testCaseId())
+                )) {
+                    throw new ResponseStatusException(
+                            HttpStatus.BAD_GATEWAY,
+                            "Judge returned an unknown test case ID: "
+                                    + result.testCaseId()
+                    );
+                }
+
+                if (executionResultMap.putIfAbsent(
+                        result.testCaseId(), result
+                ) != null) {
+                    throw new ResponseStatusException(
+                            HttpStatus.BAD_GATEWAY,
+                            "Judge returned duplicate results for test case: "
+                                    + result.testCaseId()
+                    );
+                }
+            }
+        }
+
+        // 11. Match each execution result with its expected output.
         List<TestCaseResult> results = new ArrayList<>();
 
-        for (JudgeExecutionResponse.ExecutionResult executionResult
-                : judgeResponse.results()) {
+        for (TestCase testCase : testCases) {
 
-            TestCase testCase = testCaseMap.get(
-                    executionResult.testCaseId()
-            );
+            JudgeExecutionResponse.ExecutionResult executionResult =
+                    executionResultMap.get(testCase.getId());
 
-            if (testCase == null) {
-                throw new ResponseStatusException(
-                        HttpStatus.BAD_GATEWAY,
-                        "Judge returned an unknown test case ID"
+            if (executionResult == null) {
+
+                String missingStatus = missingResultStatus(
+                        judgeResponse.status()
                 );
+
+                results.add(new TestCaseResult(
+                        testCase.getId(),
+                        missingStatus,
+                        "",
+                        judgeResponse.compileError() != null
+                                ? judgeResponse.compileError()
+                                : "Judge did not return a result for this test case.",
+                        null,
+                        null
+                ));
+
+                continue;
             }
 
-            String status = executionResult.status();
+            String executionStatus = executionResult.status();
 
-            if ("COMPLETED".equalsIgnoreCase(status)) {
+            String finalTestStatus;
+            String errorMessage = executionResult.errorMessage();
+
+            if ("COMPLETED".equalsIgnoreCase(executionStatus)) {
+
+                // Compare actual output with expected output.
                 boolean passed = compareOutput(
                         executionResult.actualOutput(),
                         testCase.getExpectedOutput(),
                         judgeConfig
                 );
 
-                status = passed ? "PASSED" : "FAILED";
+                finalTestStatus = passed ? "PASSED" : "FAILED";
+
+            } else {
+
+                // Preserve execution errors instead of treating them
+                // as ordinary wrong answers.
+                finalTestStatus = normalizeExecutionStatus(executionStatus);
+
+                if ("COMPILE_ERROR".equals(finalTestStatus)
+                        && (errorMessage == null || errorMessage.isBlank())) {
+                    errorMessage = judgeResponse.compileError();
+                }
             }
 
             results.add(new TestCaseResult(
-                    executionResult.testCaseId(),
-                    status,
+                    testCase.getId(),
+                    finalTestStatus,
                     executionResult.actualOutput(),
-                    executionResult.errorMessage(),
+                    errorMessage,
                     executionResult.runtimeMs(),
-                    executionResult.memoryKb()
+                    null
             ));
         }
 
-        // Ensure exactly three distinct results were returned
-        long distinctResults = results.stream()
-                .map(TestCaseResult::testCaseId)
-                .distinct()
-                .count();
-
-        if (results.size() != REQUIRED_VISIBLE_TESTS
-                || distinctResults != REQUIRED_VISIBLE_TESTS) {
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_GATEWAY,
-                    "Judge must return exactly one result for each of the three visible test cases"
-            );
-        }
-
-        // 11. Aggregate results
+        // 12. Calculate passed test cases.
         int passed = (int) results.stream()
                 .filter(result ->
-                        "PASSED".equalsIgnoreCase(result.status()))
+                        "PASSED".equals(result.status()))
                 .count();
 
-        long runtime = results.stream()
-                .mapToLong(TestCaseResult::runtimeMs)
-                .sum();
+        // 13. Determine overall submission status.
+        String overallStatus = determineOverallStatus(
+                judgeResponse.status(),
+                results,
+                passed
+        );
 
-        long memory = results.stream()
-                .mapToLong(TestCaseResult::memoryKb)
-                .max()
-                .orElse(0);
+        // 14. Use process-level metrics from Node Judge.
+        long runtime = judgeResponse.runtimeMs() != null
+                ? judgeResponse.runtimeMs()
+                : 0L;
 
-        String overallStatus =
-                passed == REQUIRED_VISIBLE_TESTS
-                        ? "ACCEPTED"
-                        : "WRONG_ANSWER";
+        long memory = judgeResponse.memoryKb() != null
+                ? judgeResponse.memoryKb()
+                : 0L;
 
+        // 15. Return frontend-compatible response.
         return new RunCodeResponse(
                 overallStatus,
                 passed,
@@ -227,13 +276,14 @@ public class RunCodeService {
             RunCodeRequest request,
             ProblemExecutionConfig config
     ) {
+
         boolean hasCode = request.code() != null
                 && !request.code().isBlank();
 
         boolean hasFiles = request.files() != null
                 && !request.files().isEmpty();
 
-        // Exactly one input form must be provided
+        // Exactly one input form must be provided.
         if (hasCode == hasFiles) {
             throw new ResponseStatusException(
                     HttpStatus.BAD_REQUEST,
@@ -241,12 +291,13 @@ public class RunCodeService {
             );
         }
 
-        String language = request.language().toLowerCase();
+        String language = request.language().toLowerCase(Locale.ROOT);
 
-        // Validate allowed languages
+        // Validate allowed languages.
         JsonNode allowedLanguages = config.getAllowedLanguages();
 
         if (allowedLanguages != null && allowedLanguages.isArray()) {
+
             boolean allowed = false;
 
             for (JsonNode node : allowedLanguages) {
@@ -264,9 +315,11 @@ public class RunCodeService {
             }
         }
 
-        // Validate development files
+        // Validate submitted files.
         if (hasFiles) {
+
             for (RunCodeRequest.CodeFile file : request.files()) {
+
                 if (file.file_content() == null) {
                     throw new ResponseStatusException(
                             HttpStatus.BAD_REQUEST,
@@ -278,9 +331,12 @@ public class RunCodeService {
     }
 
     private List<JudgeExecutionRequest.ExecutionFile> buildExecutionFiles(
-            RunCodeRequest request
+            RunCodeRequest request,
+            String executionMode
     ) {
+
         if (request.files() != null && !request.files().isEmpty()) {
+
             return request.files().stream()
                     .map(file ->
                             new JudgeExecutionRequest.ExecutionFile(
@@ -292,21 +348,36 @@ public class RunCodeService {
                     .toList();
         }
 
+        String language = request.language().toLowerCase(Locale.ROOT);
+
+        // Java FUNCTION mode expects Solution.java because
+        // the generated Java harness instantiates Solution.
+        String fileName;
+
+        if ("java".equals(language)
+                && "FUNCTION".equalsIgnoreCase(executionMode)) {
+            fileName = "Solution.java";
+        } else {
+            fileName = "Main." + extension(language);
+        }
+
         return List.of(
                 new JudgeExecutionRequest.ExecutionFile(
-                        "Main." + extension(request.language()),
+                        fileName,
                         request.code(),
-                        request.language()
+                        language
                 )
         );
     }
 
     private String extension(String language) {
-        return switch (language.toLowerCase()) {
+
+        return switch (language.toLowerCase(Locale.ROOT)) {
             case "java" -> "java";
             case "python" -> "py";
             case "c" -> "c";
             case "cpp", "c++" -> "cpp";
+
             default -> throw new ResponseStatusException(
                     HttpStatus.BAD_REQUEST,
                     "Unsupported language: " + language
@@ -314,69 +385,149 @@ public class RunCodeService {
         };
     }
 
+    private String missingResultStatus(String judgeStatus) {
+
+        if (judgeStatus == null) {
+            return "EXECUTION_ERROR";
+        }
+
+        return switch (judgeStatus.toUpperCase(Locale.ROOT)) {
+            case "COMPILE_ERROR" -> "COMPILE_ERROR";
+            case "TIME_LIMIT_EXCEEDED" -> "TIME_LIMIT_EXCEEDED";
+            default -> "EXECUTION_ERROR";
+        };
+    }
+
+    private String normalizeExecutionStatus(String status) {
+
+        if (status == null) {
+            return "EXECUTION_ERROR";
+        }
+
+        return switch (status.toUpperCase(Locale.ROOT)) {
+            case "COMPILE_ERROR" -> "COMPILE_ERROR";
+            case "TIME_LIMIT_EXCEEDED" -> "TIME_LIMIT_EXCEEDED";
+            case "RUNTIME_ERROR" -> "RUNTIME_ERROR";
+            case "EXECUTION_ERROR" -> "EXECUTION_ERROR";
+            default -> "EXECUTION_ERROR";
+        };
+    }
+
+    private String determineOverallStatus(
+            String judgeStatus,
+            List<TestCaseResult> results,
+            int passed
+    ) {
+
+        // Respect global execution failures first.
+        if (judgeStatus != null) {
+
+            switch (judgeStatus.toUpperCase(Locale.ROOT)) {
+                case "COMPILE_ERROR":
+                    return "COMPILE_ERROR";
+
+                case "TIME_LIMIT_EXCEEDED":
+                    return "TIME_LIMIT_EXCEEDED";
+
+                case "EXECUTION_ERROR":
+                    return "EXECUTION_ERROR";
+            }
+        } else {
+            return "EXECUTION_ERROR";
+        }
+
+        // Inspect individual test-case statuses.
+        boolean hasTimeout = results.stream()
+                .anyMatch(result ->
+                        "TIME_LIMIT_EXCEEDED".equals(result.status()));
+
+        boolean hasCompileError = results.stream()
+                .anyMatch(result ->
+                        "COMPILE_ERROR".equals(result.status()));
+
+        boolean hasRuntimeError = results.stream()
+                .anyMatch(result ->
+                        "RUNTIME_ERROR".equals(result.status()));
+
+        boolean hasExecutionError = results.stream()
+                .anyMatch(result ->
+                        "EXECUTION_ERROR".equals(result.status()));
+
+        if (hasTimeout) return "TIME_LIMIT_EXCEEDED";
+        if (hasCompileError) return "COMPILE_ERROR";
+        if (hasRuntimeError) return "RUNTIME_ERROR";
+        if (hasExecutionError) return "EXECUTION_ERROR";
+
+        return passed == REQUIRED_VISIBLE_TESTS
+                ? "ACCEPTED"
+                : "WRONG_ANSWER";
+    }
+
     private Map<String, Object> toMap(JsonNode node) {
-    if (node == null || node.isNull()) {
-        return Map.of();
-    }
 
-    if (!node.isObject()) {
-        throw new IllegalArgumentException(
-                "Execution configuration must be a JSON object"
+        if (node == null || node.isNull()) {
+            return Map.of();
+        }
+
+        if (!node.isObject()) {
+            throw new IllegalArgumentException(
+                    "Configuration must be a JSON object"
+            );
+        }
+
+        Map<String, Object> result = new java.util.LinkedHashMap<>();
+
+        node.fields().forEachRemaining(entry ->
+                result.put(entry.getKey(), toJavaValue(entry.getValue()))
         );
+
+        return result;
     }
 
-    Map<String, Object> result = new java.util.LinkedHashMap<>();
+    private Object toJavaValue(JsonNode node) {
 
-    node.fields().forEachRemaining(entry ->
-            result.put(entry.getKey(), toJavaValue(entry.getValue()))
-    );
+        if (node == null || node.isNull()) {
+            return null;
+        }
 
-    return result;
-}
+        if (node.isObject()) {
+            return toMap(node);
+        }
 
-private Object toJavaValue(JsonNode node) {
-    if (node == null || node.isNull()) {
-        return null;
-    }
+        if (node.isArray()) {
+            List<Object> values = new ArrayList<>();
+            node.forEach(value -> values.add(toJavaValue(value)));
+            return values;
+        }
 
-    if (node.isObject()) {
-        return toMap(node);
-    }
+        if (node.isTextual()) {
+            return node.asText();
+        }
 
-    if (node.isArray()) {
-        List<Object> values = new ArrayList<>();
-        node.forEach(value -> values.add(toJavaValue(value)));
-        return values;
-    }
+        if (node.isBoolean()) {
+            return node.asBoolean();
+        }
 
-    if (node.isTextual()) {
+        if (node.isNumber()) {
+            return node.numberValue();
+        }
+
         return node.asText();
     }
 
-    if (node.isBoolean()) {
-        return node.asBoolean();
-    }
-
-    if (node.isNumber()) {
-        return node.numberValue();
-    }
-
-    return node.asText();
-}
-
     private boolean compareOutput(
-            String actual,
-            String expected,
-            ProblemJudgeConfig judgeConfig
+        String actual,
+        String expected,
+        ProblemJudgeConfig judgeConfig
     ) {
         String checkerType = judgeConfig.getCheckerType();
 
-        // Initial implementation: normalized exact comparison
-        if (checkerType == null
-                || "EXACT".equalsIgnoreCase(checkerType)
-                || "NORMALIZED".equalsIgnoreCase(checkerType)) {
+        if (checkerType == null || "EXACT".equalsIgnoreCase(checkerType)) {
+                return Objects.equals(actual, expected);
+        }
 
-            return normalize(actual).equals(normalize(expected));
+        if ("NORMALIZED".equalsIgnoreCase(checkerType)) {
+                return normalize(actual).equals(normalize(expected));
         }
 
         throw new ResponseStatusException(
@@ -385,11 +536,17 @@ private Object toJavaValue(JsonNode node) {
         );
     }
 
+    private String safe(String value) {
+        return value == null ? "" : value;
+    }
+
     private String normalize(String value) {
         if (value == null) {
-            return "";
+                return "";
         }
 
-        return value.trim().replaceAll("\\s+", " ");
+        return value.trim()
+            .replaceAll("\\s+", " ")
+            .replaceAll("\\s*([,\\[\\]{}:])\\s*", "$1");
     }
 }

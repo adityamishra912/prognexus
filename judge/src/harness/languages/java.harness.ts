@@ -5,6 +5,35 @@ import type {
     HarnessTestCase
 } from "../harness.types.js";
 
+function addJavaUtilImport(source: string): string {
+    // Wildcard import already provides Map, HashMap, Arrays, etc.
+    if (/import\s+java\.util\.\*\s*;/.test(source)) {
+        return source;
+    }
+
+    const importStatement = "import java.util.*;\n";
+
+    // If a package declaration exists, insert the import after it.
+    const packageMatch = source.match(
+        /^(\s*package\s+[^;]+;\s*)/m
+    );
+
+    if (packageMatch && packageMatch.index !== undefined) {
+        const insertPosition =
+            packageMatch.index + packageMatch[0].length;
+
+        return (
+            source.slice(0, insertPosition) +
+            "\n" +
+            importStatement +
+            source.slice(insertPosition)
+        );
+    }
+
+    // No package declaration: add import at the beginning.
+    return importStatement + source;
+}
+
 export function generateJavaHarness(
     files: HarnessFile[],
     spec: FunctionSpec,
@@ -132,8 +161,6 @@ export function generateJavaHarness(
             ByteArrayOutputStream userOutput =
                 new ByteArrayOutputStream();
 
-            PrintStream originalOut = System.out;
-
             String actualOutput = "";
             String stdout = "";
             String executionStatus = "COMPLETED";
@@ -259,7 +286,16 @@ public class Main {
 `;
 
     return [
-        ...files.filter(file => file.filePath !== "Main.java"),
+        ...files
+            .filter(file => file.filePath !== "Main.java")
+            .map(file =>
+                file === sourceFile
+                    ? {
+                        ...file,
+                        fileContent: addJavaUtilImport(file.fileContent)
+                    }
+                    : file
+            ),
         {
             filePath: "Main.java",
             fileContent: harness,

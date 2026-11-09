@@ -196,12 +196,14 @@ export async function executeGeneratedHarness(
         let runResult;
 
         try {
+            const timeoutSeconds = (options.timeLimitMs / 1000).toFixed(3);
+
             runResult = await sandbox.runCommand({
                 cmd: "timeout",
                 args: [
                     "--signal=TERM",
                     "--kill-after=1s",
-                    `${options.timeLimitMs}ms`,
+                    `${timeoutSeconds}s`,
                     "/usr/bin/time",
                     "-f",
                     `${METRICS_MARKER}%e|%M`,

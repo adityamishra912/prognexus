@@ -5,6 +5,6 @@ public record TestCaseResult(
         String status,
         String actualOutput,
         String errorMessage,
-        long runtimeMs,
-        long memoryKb
+        Long runtimeMs,
+        Long memoryKb
 ) {}

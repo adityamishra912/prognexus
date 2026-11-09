@@ -1,6 +1,6 @@
 import { Sandbox } from "@vercel/sandbox";
 
-const IMAGE = "apexcode-runtime:v1";
+const IMAGE = "apexcode-runtime:v2";
 
 export async function createSandbox() {
   return Sandbox.create({
