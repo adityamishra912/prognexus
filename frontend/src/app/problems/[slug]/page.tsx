@@ -30,7 +30,7 @@ export default async function ProblemDetailPage({ params }: PageProps) {
 
   if (problemError) {
     return (
-      <Card className="my-8 text-center py-12 space-y-3">
+      <Card className="my-8 text-center py-12 space-y-3" role="alert">
         <h1 className="text-lg font-semibold text-rose-300">
           Unable to load this problem
         </h1>
